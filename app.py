@@ -5,11 +5,72 @@ import numpy as np
 import requests
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Financial Metrics Dashboard", layout="wide")
+st.set_page_config(page_title="Financial Analytics Terminal", layout="wide", initial_sidebar_state="collapsed")
 
-st.title("📊 Financial Metrics & Valuation Explorer")
-st.caption("Umfassende Fundamentalanalyse, Bilanzdaten, interaktive Diagramme & DCF-Metriken")
+# 1. Custom CSS für das moderne Card-Grid-Design
+st.markdown("""
+<style>
+    /* Hintergrund & Grundtypografie */
+    .stApp {
+        background-color: #f3f4f6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    /* Hauptcontainer-Abstände minimieren */
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+        max-width: 95%;
+    }
 
+    /* KPI Card Header Styling */
+    .metric-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+        padding: 0 4px;
+    }
+
+    .metric-card-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        color: #374151;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .kpi-pill {
+        background-color: #fca5a5;
+        color: #991b1b;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+        letter-spacing: 0.5px;
+    }
+
+    .price-change-badge {
+        background-color: #dcfce7;
+        color: #15803d;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    /* Dataframe-Styling */
+    div[data-testid="stDataFrame"] {
+        background-color: #ffffff;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 2. Ticker Auflösung
 def resolve_ticker(query: str) -> str:
     query = query.strip()
     if not query:
@@ -25,238 +86,365 @@ def resolve_ticker(query: str) -> str:
         pass
     return query.upper()
 
-col_input, col_btn = st.columns([4, 1])
-with col_input:
-    user_query = st.text_input("Geben Sie ein Tickersymbol oder einen Unternehmensnamen ein:", value="Apple")
-with col_btn:
-    st.write("")
-    search_clicked = st.button("Analysieren", use_container_width=True)
+# Suchleiste
+col_search, col_spacer = st.columns([2, 3])
+with col_search:
+    user_query = st.text_input("Unternehmen oder Ticker eingeben:", value="Apple", label_visibility="collapsed")
+    ticker_symbol = resolve_ticker(user_query)
 
-ticker_symbol = resolve_ticker(user_query)
+if not ticker_symbol:
+    st.stop()
 
-if ticker_symbol:
-    ticker = yf.Ticker(ticker_symbol)
-    
-    with st.spinner(f"Lade Finanzdaten für {ticker_symbol}..."):
-        try:
-            info = ticker.info or {}
-            financials = ticker.financials
-            balance_sheet = ticker.balance_sheet
-            cashflow = ticker.cashflow
-            dividends = ticker.dividends
-        except Exception as e:
-            st.error(f"Fehler beim Abrufen der Marktdaten: {e}")
-            st.stop()
+ticker = yf.Ticker(ticker_symbol)
 
-    if not info or financials.empty:
-        st.warning(f"Keine ausreichenden Daten für '{user_query}' (Symbol: {ticker_symbol}) gefunden.")
+with st.spinner(f"Lade Finanzdaten für {ticker_symbol}..."):
+    try:
+        info = ticker.info or {}
+        financials = ticker.financials
+        balance_sheet = ticker.balance_sheet
+        cashflow = ticker.cashflow
+        dividends = ticker.dividends
+        hist = ticker.history(period="1y")
+    except Exception as e:
+        st.error(f"Fehler beim Datenabruf: {e}")
         st.stop()
 
-    # Stammdaten Header
-    st.subheader(f"{info.get('longName', ticker_symbol)} ({ticker_symbol})")
-    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-    m_col1.metric("Sektor", info.get("sector", "N/A"))
-    m_col2.metric("Industrie", info.get("industry", "N/A"))
-    m_col3.metric("Währung", info.get("currency", "USD"))
-    curr_price = info.get("currentPrice") or info.get("regularMarketPrice")
-    m_col4.metric("Aktueller Kurs", f"{curr_price:,.2f} {info.get('currency', '')}" if curr_price else "N/A")
+if not info or financials.empty:
+    st.warning(f"Keine ausreichenden Daten für '{user_query}' ({ticker_symbol}) gefunden.")
+    st.stop()
 
-    st.markdown("---")
+# Plotly Base Styling Funktion
+def build_clean_chart(fig, y_prefix="", y_suffix=""):
+    fig.update_layout(
+        template="plotly_white",
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        margin=dict(l=42, r=12, t=10, b=45),
+        height=210,
+        showlegend=False,
+        hovermode="x unified",
+        xaxis=dict(
+            showgrid=False,
+            linecolor="#e5e7eb",
+            tickangle=-45,
+            tickfont=dict(size=10, color="#6b7280")
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="#f3f4f6",
+            gridwidth=1,
+            linecolor="transparent",
+            tickfont=dict(size=10, color="#6b7280"),
+            tickprefix=y_prefix,
+            ticksuffix=y_suffix
+        )
+    )
+    return fig
 
-    def format_df(df: pd.DataFrame) -> pd.DataFrame:
-        formatted = df.copy()
-        formatted.columns = [pd.to_datetime(c).strftime("%Y-%m-%d") if isinstance(c, (pd.Timestamp, str)) else str(c) for c in formatted.columns]
-        for col in formatted.columns:
-            formatted[col] = formatted[col].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) and isinstance(x, (int, float)) else ("N/A" if pd.isna(x) else x))
-        return formatted
+# Zeitreihen & Metrik-Extraktion
+years = sorted(financials.columns)
+date_labels = [pd.to_datetime(y).strftime("%Y") for y in years]
 
-    years = sorted(financials.columns)  # Chronologisch für Charts von alt nach neu
+def get_row(key, df):
+    return df.loc[key] if key in df.index else pd.Series(0, index=df.columns)
 
-    def get_fin(key, df):
-        return df.loc[key] if key in df.index else pd.Series(index=df.columns, dtype=float)
+rev = get_row("Total Revenue", financials)
+ebitda = get_row("EBITDA", financials)
+net_inc = get_row("Net Income", financials)
+ocf = get_row("Operating Cash Flow", cashflow)
+capex = get_row("Capital Expenditure", cashflow)
+fcf = ocf.fillna(0) + capex.fillna(0)
 
-    rev = get_fin("Total Revenue", financials)
-    gross_profit = get_fin("Gross Profit", financials)
-    ebit = get_fin("Operating Income", financials)
-    net_income = get_fin("Net Income", financials)
-    ebitda = get_fin("EBITDA", financials)
+# Kursveränderung (1Y)
+curr_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+price_change_pct = 0.0
+if not hist.empty and len(hist) > 1:
+    first_price = hist['Close'].iloc[0]
+    last_price = hist['Close'].iloc[-1]
+    price_change_pct = ((last_price - first_price) / first_price) * 100
 
-    # 1. GuV & Margen
-    st.markdown("### 1. Gewinn- und Verlustrechnung (Income Statement) & Margen")
-    
-    # Diagramm: Umsatz & Net Income Trend
-    years_str = [pd.to_datetime(y).strftime("%Y") for y in years]
-    rev_vals = [rev.get(y, 0) / 1e9 for y in years]
-    net_vals = [net_income.get(y, 0) / 1e9 for y in years]
-    ebitda_vals = [ebitda.get(y, 0) / 1e9 for y in years]
+st.markdown(f"## {info.get('longName', ticker_symbol)} ({ticker_symbol})")
 
-    fig_is = go.Figure()
-    fig_is.add_trace(go.Bar(x=years_str, y=rev_vals, name="Umsatz (Mrd.)", marker_color="#2563eb"))
-    fig_is.add_trace(go.Bar(x=years_str, y=ebitda_vals, name="EBITDA (Mrd.)", marker_color="#06b6d4"))
-    fig_is.add_trace(go.Bar(x=years_str, y=net_vals, name="Nettogewinn (Mrd.)", marker_color="#10b981"))
-    fig_is.update_layout(barmode='group', title="Historische Ertragsentwicklung (in Milliarden)", margin=dict(t=40, b=20, l=20, r=20), height=350)
-    st.plotly_chart(fig_is, use_container_width=True)
+# ==============================================================================
+# REIHE 1: VISUELLES KARTEN-RASTER (Card Grid wie im Screenshot)
+# ==============================================================================
+c1, c2, c3, c4 = st.columns(4)
 
-    # Margenberechnung (%)
-    margins = pd.DataFrame(index=[
-        "Gross Margin (%)",
-        "Operating Margin (%)",
-        "EBITDA Margin (%)",
-        "Net Profit Margin (%)"
-    ], columns=years)
+# 1. Price Area Chart
+with c1:
+    st.markdown(f"""
+    <div class="metric-card-header">
+        <span class="metric-card-title">Price <span class="price-change-badge">{'↑' if price_change_pct >= 0 else '↓'} {price_change_pct:+.2f}%</span></span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    if not hist.empty:
+        fig_price = go.Figure()
+        fig_price.add_trace(go.Scatter(
+            x=hist.index, y=hist['Close'],
+            mode='lines',
+            line=dict(color="#16a34a", width=1.8),
+            fill='tozeroy',
+            fillcolor='rgba(22, 163, 74, 0.12)'
+        ))
+        st.plotly_chart(build_clean_chart(fig_price, y_prefix="$"), use_container_width=True)
 
-    for y in years:
-        r = rev.get(y, np.nan)
-        if pd.notnull(r) and r != 0:
-            margins.loc["Gross Margin (%)", y] = (gross_profit.get(y, np.nan) / r) * 100
-            margins.loc["Operating Margin (%)", y] = (ebit.get(y, np.nan) / r) * 100
-            margins.loc["EBITDA Margin (%)", y] = (ebitda.get(y, np.nan) / r) * 100
-            margins.loc["Net Profit Margin (%)", y] = (net_income.get(y, np.nan) / r) * 100
+# 2. Revenue (Warm Orange/Amber Bar Chart)
+with c2:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title">Revenue</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    fig_rev = go.Figure()
+    fig_rev.add_trace(go.Bar(
+        x=date_labels, y=[rev.get(y, 0) / 1e9 for y in years],
+        marker_color="#e08a3c",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_rev, y_prefix="$", y_suffix="B"), use_container_width=True)
 
-    col_is1, col_is2 = st.columns(2)
-    with col_is1:
-        st.write("**Absolute Zahlen (in Originalwährung)**")
+# 3. Gross Profit (KPI Stack/Comparison)
+with c3:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title"><span class="kpi-pill">KPI</span> Gross Profit</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    gp = get_row("Gross Profit", financials)
+    fig_gp = go.Figure()
+    fig_gp.add_trace(go.Bar(
+        x=date_labels, y=[gp.get(y, 0) / 1e9 for y in years],
+        marker_color="#c27838",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_gp, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+# 4. Operating Income / EBIT (Slate / Blue-Grey)
+with c4:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title"><span class="kpi-pill">KPI</span> Operating Income</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    ebit = get_row("Operating Income", financials)
+    fig_ebit = go.Figure()
+    fig_ebit.add_trace(go.Bar(
+        x=date_labels, y=[ebit.get(y, 0) / 1e9 for y in years],
+        marker_color="#64748b",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_ebit, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+# ==============================================================================
+# REIHE 2: EBITDA, NET INCOME, FCF, EPS (Farben exakt aus dem Screenshot)
+# ==============================================================================
+r2_1, r2_2, r2_3, r2_4 = st.columns(4)
+
+# 5. EBITDA (Light Blue Bar Chart)
+with r2_1:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title">EBITDA</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    fig_ebitda = go.Figure()
+    fig_ebitda.add_trace(go.Bar(
+        x=date_labels, y=[ebitda.get(y, 0) / 1e9 for y in years],
+        marker_color="#93c5fd",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_ebitda, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+# 6. Net Income (Soft Salmon / Orange Bar Chart)
+with r2_2:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title">Net Income</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    fig_ni = go.Figure()
+    fig_ni.add_trace(go.Bar(
+        x=date_labels, y=[net_inc.get(y, 0) / 1e9 for y in years],
+        marker_color="#fca5a5",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_ni, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+# 7. Free Cash Flow (Golden Amber Bar Chart)
+with r2_3:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title">Free Cash Flow</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    fig_fcf = go.Figure()
+    fig_fcf.add_trace(go.Bar(
+        x=date_labels, y=[fcf.get(y, 0) / 1e9 for y in years],
+        marker_color="#d97706",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_fcf, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+# 8. EPS (Soft Yellow/Gold Bar Chart)
+with r2_4:
+    st.markdown("""
+    <div class="metric-card-header">
+        <span class="metric-card-title">EPS</span>
+        <span style="color:#9ca3af; font-size:12px;">↗</span>
+    </div>
+    """, unsafe_allow_html=True)
+    shares = info.get("sharesOutstanding", 1) or 1
+    eps_vals = [net_inc.get(y, 0) / shares for y in years]
+    fig_eps = go.Figure()
+    fig_eps.add_trace(go.Bar(
+        x=date_labels, y=eps_vals,
+        marker_color="#fde047",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_eps, y_prefix="$"), use_container_width=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ==============================================================================
+# DETAILTABELLEN & DEEP DIVE (Integrierte Fundamentaldaten)
+# ==============================================================================
+tabs = st.tabs(["📑 GuV & Margen", "🏛️ Bilanz & Schulden", "💸 Cashflow & FCF", "⚖️ Bewertung & DCF", "🎁 Dividenden"])
+
+def format_df(df: pd.DataFrame) -> pd.DataFrame:
+    res = df.copy()
+    res.columns = [pd.to_datetime(c).strftime("%Y-%m-%d") if isinstance(c, (pd.Timestamp, str)) else str(c) for c in res.columns]
+    for col in res.columns:
+        res[col] = res[col].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) and isinstance(x, (int, float)) else ("N/A" if pd.isna(x) else x))
+    return res
+
+with tabs[0]:
+    t1, t2 = st.columns(2)
+    with t1:
+        st.write("**Gewinn- und Verlustrechnung (in Währung)**")
         df_inc = pd.DataFrame({
             "Revenue (Umsatz)": rev,
-            "Gross Profit (Bruttogewinn)": gross_profit,
-            "Operating Income / EBIT": ebit,
+            "Gross Profit": gp,
+            "Operating Income (EBIT)": ebit,
             "EBITDA": ebitda,
-            "Net Income (Nettogewinn)": net_income
+            "Net Income (Nettogewinn)": net_inc
         }).T
         st.dataframe(format_df(df_inc), use_container_width=True)
+    with t2:
+        st.write("**Margenprofil (%)**")
+        margins = pd.DataFrame(index=["Gross Margin", "Operating Margin", "EBITDA Margin", "Net Margin"], columns=years)
+        for y in years:
+            r = rev.get(y, np.nan)
+            if pd.notnull(r) and r != 0:
+                margins.loc["Gross Margin", y] = f"{(gp.get(y, 0)/r)*100:.2f}%"
+                margins.loc["Operating Margin", y] = f"{(ebit.get(y, 0)/r)*100:.2f}%"
+                margins.loc["EBITDA Margin", y] = f"{(ebitda.get(y, 0)/r)*100:.2f}%"
+                margins.loc["Net Margin", y] = f"{(net_inc.get(y, 0)/r)*100:.2f}%"
+        margins.columns = [pd.to_datetime(c).strftime("%Y-%m-%d") for c in margins.columns]
+        st.dataframe(margins, use_container_width=True)
 
-    with col_is2:
-        # Liniendiagramm für Margenverlauf
-        fig_margin = go.Figure()
-        for m_name in margins.index:
-            fig_margin.add_trace(go.Scatter(x=years_str, y=margins.loc[m_name], mode='lines+markers', name=m_name.replace(" (%)", "")))
-        fig_margin.update_layout(title="Margenprofil über Zeit (%)", margin=dict(t=40, b=20, l=20, r=20), height=320)
-        st.plotly_chart(fig_margin, use_container_width=True)
-
-    # 2. Bilanz & Verschuldung
-    st.markdown("### 2. Bilanz & Verschuldung (Balance Sheet)")
-    
-    bs_years = sorted(balance_sheet.columns)
-    total_assets = get_fin("Total Assets", balance_sheet)
-    total_liab = get_fin("Total Liabilities Net Minority Interest", balance_sheet)
-    cash = get_fin("Cash And Cash Equivalents", balance_sheet)
-    st_debt = get_fin("Current Debt", balance_sheet)
-    lt_debt = get_fin("Long Term Debt", balance_sheet)
-    stockholders_equity = get_fin("Stockholders Equity", balance_sheet)
-
+with tabs[1]:
+    t_bs1, t_bs2 = st.columns(2)
+    total_assets = get_row("Total Assets", balance_sheet)
+    total_liab = get_row("Total Liabilities Net Minority Interest", balance_sheet)
+    cash = get_row("Cash And Cash Equivalents", balance_sheet)
+    st_debt = get_row("Current Debt", balance_sheet)
+    lt_debt = get_row("Long Term Debt", balance_sheet)
     total_debt = st_debt.fillna(0) + lt_debt.fillna(0)
     net_debt = total_debt - cash.fillna(0)
+    equity = get_row("Stockholders Equity", balance_sheet)
 
-    bs_years_str = [pd.to_datetime(y).strftime("%Y") for y in bs_years]
-    fig_bs = go.Figure()
-    fig_bs.add_trace(go.Bar(x=bs_years_str, y=[total_debt.get(y, 0) / 1e9 for y in bs_years], name="Total Debt (Mrd.)", marker_color="#ef4444"))
-    fig_bs.add_trace(go.Bar(x=bs_years_str, y=[cash.get(y, 0) / 1e9 for y in bs_years], name="Cash (Mrd.)", marker_color="#22c55e"))
-    fig_bs.add_trace(go.Scatter(x=bs_years_str, y=[net_debt.get(y, 0) / 1e9 for y in bs_years], mode='lines+markers', name="Net Debt (Mrd.)", line=dict(color="#f97316", width=3)))
-    fig_bs.update_layout(title="Liquidität vs. Gesamt- und Nettoverschuldung", margin=dict(t=40, b=20, l=20, r=20), height=350)
-    st.plotly_chart(fig_bs, use_container_width=True)
+    with t_bs1:
+        st.write("**Bilanzpositionen**")
+        df_bs = pd.DataFrame({
+            "Total Assets": total_assets,
+            "Total Liabilities": total_liab,
+            "Cash & Equivalents": cash,
+            "Total Debt": total_debt,
+            "Net Debt": net_debt
+        }).T
+        st.dataframe(format_df(df_bs), use_container_width=True)
+    with t_bs2:
+        st.write("**Verschuldungsgrade**")
+        ratios_bs = pd.DataFrame(index=["Debt-to-Equity", "Net Debt / EBITDA"], columns=balance_sheet.columns)
+        for y in balance_sheet.columns:
+            eq = equity.get(y, np.nan)
+            eb = ebitda.get(y, np.nan)
+            td = total_debt.get(y, np.nan)
+            nd = net_debt.get(y, np.nan)
+            ratios_bs.loc["Debt-to-Equity", y] = f"{(td/eq):.2f}x" if pd.notnull(eq) and eq != 0 else "N/A"
+            ratios_bs.loc["Net Debt / EBITDA", y] = f"{(nd/eb):.2f}x" if pd.notnull(eb) and eb != 0 else "N/A"
+        ratios_bs.columns = [pd.to_datetime(c).strftime("%Y-%m-%d") for c in ratios_bs.columns]
+        st.dataframe(ratios_bs, use_container_width=True)
 
-    df_bs = pd.DataFrame({
-        "Total Assets (Gesamtvermögen)": total_assets,
-        "Total Liabilities (Gesamtverbindlichkeiten)": total_liab,
-        "Cash & Cash Equivalents (Liquide Mittel)": cash,
-        "Short-Term Debt (Kurzfristige Schulden)": st_debt,
-        "Long-Term Debt (Langfristige Schulden)": lt_debt,
-        "Total Debt (Gesamtschulden)": total_debt,
-        "Net Debt (Nettoschulden)": net_debt,
-    }).T
-    st.dataframe(format_df(df_bs), use_container_width=True)
-
-    # 3. Cashflow & Free Cashflow
-    st.markdown("### 3. Cashflow-Rechnung & FCF-Metriken")
-    
-    cf_years = sorted(cashflow.columns)
-    cf_years_str = [pd.to_datetime(y).strftime("%Y") for y in cf_years]
-    ocf = get_fin("Operating Cash Flow", cashflow)
-    capex = get_fin("Capital Expenditure", cashflow)
-    fcf = ocf.fillna(0) + capex.fillna(0)
-
-    fig_cf = go.Figure()
-    fig_cf.add_trace(go.Bar(x=cf_years_str, y=[ocf.get(y, 0) / 1e9 for y in cf_years], name="Operating Cashflow (Mrd.)", marker_color="#3b82f6"))
-    fig_cf.add_trace(go.Bar(x=cf_years_str, y=[abs(capex.get(y, 0)) / 1e9 for y in cf_years], name="CapEx (Mrd.)", marker_color="#f43f5e"))
-    fig_cf.add_trace(go.Bar(x=cf_years_str, y=[fcf.get(y, 0) / 1e9 for y in cf_years], name="Free Cash Flow (Mrd.)", marker_color="#10b981"))
-    fig_cf.update_layout(barmode='group', title="Cashflow-Komponenten & Free Cash Flow (in Mrd.)", margin=dict(t=40, b=20, l=20, r=20), height=350)
-    st.plotly_chart(fig_cf, use_container_width=True)
-
-    df_cf = pd.DataFrame({
-        "Operating Cash Flow": ocf,
-        "Capital Expenditures (CapEx)": capex,
-        "Free Cash Flow (FCF)": fcf,
-    }).T
-    st.dataframe(format_df(df_cf), use_container_width=True)
-
-    # 4. Bewertung & Marktdaten
-    st.markdown("### 4. Bewertung & Marktdaten (Valuation)")
+with tabs[2]:
     market_cap = info.get("marketCap", np.nan)
-    shares_out = info.get("sharesOutstanding")
-    latest_fcf = fcf.iloc[-1] if not fcf.empty else np.nan
-    p_fcf = (market_cap / latest_fcf) if (pd.notnull(market_cap) and pd.notnull(latest_fcf) and latest_fcf > 0) else "N/A"
+    t_cf1, t_cf2 = st.columns(2)
+    with t_cf1:
+        st.write("**Cashflow-Entwicklung**")
+        df_cf = pd.DataFrame({
+            "Operating Cash Flow": ocf,
+            "Capital Expenditures (CapEx)": capex,
+            "Free Cash Flow": fcf
+        }).T
+        st.dataframe(format_df(df_cf), use_container_width=True)
+    with t_cf2:
+        st.write("**FCF Yield (aktuelle Bewertung)**")
+        fcf_yield_row = pd.DataFrame(index=["FCF Yield"], columns=cashflow.columns)
+        for y in cashflow.columns:
+            curr_fcf = fcf.get(y, np.nan)
+            fcf_yield_row.loc["FCF Yield", y] = f"{(curr_fcf/market_cap)*100:.2f}%" if pd.notnull(curr_fcf) and pd.notnull(market_cap) else "N/A"
+        fcf_yield_row.columns = [pd.to_datetime(c).strftime("%Y-%m-%d") for c in fcf_yield_row.columns]
+        st.dataframe(fcf_yield_row, use_container_width=True)
 
-    val_data = {
-        "Kennzahl": [
-            "Market Capitalization (Marktkapitalisierung)",
-            "Trailing P/E (KGV)",
-            "Forward P/E (Erwartetes KGV)",
-            "P/FCF Ratio (Kurs-FCF-Verhältnis LTM)",
-            "EV / EBITDA",
-            "Shares Outstanding (Ausstehende Aktien)",
-            "EPS Trailing (Gewinn je Aktie)",
-            "EPS Forward"
-        ],
-        "Wert": [
-            f"{market_cap:,.0f} {info.get('currency', '')}" if pd.notnull(market_cap) else "N/A",
-            f"{info.get('trailingPE', 0):.2f}" if info.get('trailingPE') else "N/A",
-            f"{info.get('forwardPE', 0):.2f}" if info.get('forwardPE') else "N/A",
-            f"{p_fcf:.2f}" if isinstance(p_fcf, (int, float)) else "N/A",
-            f"{info.get('enterpriseToEbitda', 0):.2f}" if info.get('enterpriseToEbitda') else "N/A",
-            f"{shares_out:,.0f}" if shares_out else "N/A",
-            f"{info.get('trailingEps', 0):.2f}" if info.get('trailingEps') else "N/A",
-            f"{info.get('forwardEps', 0):.2f}" if info.get('forwardEps') else "N/A"
-        ]
-    }
-    st.dataframe(pd.DataFrame(val_data), use_container_width=True)
-
-    # 5. Dividendenhistorie
-    st.markdown("### 5. Dividendenhistorie")
-    if not dividends.empty:
-        annual_div = dividends.resample('YE').sum()
-        div_years = [d.strftime("%Y") for d in annual_div.index[-10:]]
-        div_vals = annual_div.values[-10:]
-        
-        fig_div = go.Figure()
-        fig_div.add_trace(go.Bar(x=div_years, y=div_vals, marker_color="#8b5cf6", name="Dividende je Aktie"))
-        fig_div.update_layout(title="Ausschüttung je Aktie p.a. (letzte 10 Jahre)", margin=dict(t=40, b=20, l=20, r=20), height=300)
-        st.plotly_chart(fig_div, use_container_width=True)
-    else:
-        st.info("Keine Dividendenhistorie für dieses Wertpapier vorhanden.")
-
-    # 6. DCF Inputs & Analysten
-    st.markdown("### 6. DCF-Parameter & Konsensschätzungen")
-    col_dcf1, col_dcf2 = st.columns(2)
-    with col_dcf1:
-        target_mean = info.get("targetMeanPrice")
-        rec = info.get("recommendationKey", "N/A")
+with tabs[3]:
+    t_v1, t_v2 = st.columns(2)
+    with t_v1:
+        st.write("**Bewertungs-Multiples**")
         st.dataframe(pd.DataFrame({
-            "Metrik": ["Empfehlung", "Kursziel Ø", "Kursziel Max", "Kursziel Min", "Analystenanzahl"],
+            "Metrik": ["Market Cap", "Trailing P/E", "Forward P/E", "EV/EBITDA", "Trailing EPS", "Forward EPS"],
             "Wert": [
-                rec.upper(),
-                f"{target_mean:,.2f}" if target_mean else "N/A",
-                f"{info.get('targetHighPrice', 0):,.2f}" if info.get('targetHighPrice') else "N/A",
-                f"{info.get('targetLowPrice', 0):,.2f}" if info.get('targetLowPrice') else "N/A",
-                str(info.get("numberOfAnalystOpinions", "N/A"))
+                f"{market_cap:,.0f} {info.get('currency', '')}" if pd.notnull(market_cap) else "N/A",
+                f"{info.get('trailingPE', 0):.2f}" if info.get('trailingPE') else "N/A",
+                f"{info.get('forwardPE', 0):.2f}" if info.get('forwardPE') else "N/A",
+                f"{info.get('enterpriseToEbitda', 0):.2f}" if info.get('enterpriseToEbitda') else "N/A",
+                f"{info.get('trailingEps', 0):.2f}" if info.get('trailingEps') else "N/A",
+                f"{info.get('forwardEps', 0):.2f}" if info.get('forwardEps') else "N/A"
             ]
         }), use_container_width=True)
-    
-    with col_dcf2:
+    with t_v2:
+        st.write("**DCF Baseline & Analysten**")
         beta = info.get("beta", 1.0) or 1.0
-        rf = 4.25
-        erp = 5.0
-        cost_eq = rf + (beta * erp)
+        rf, erp = 4.25, 5.0
         st.dataframe(pd.DataFrame({
-            "DCF Benchmark": ["Beta", "Risk-Free Rate (Rf)", "Equity Risk Premium (ERP)", "Cost of Equity (CAPM)", "Terminal Growth Target"],
-            "Wert": [f"{beta:.2f}", f"{rf:.2f}%", f"{erp:.2f}%", f"{cost_eq:.2f}%", "2.0% - 2.5%"]
+            "Parameter": ["Beta", "Risk-Free Rate (Rf)", "Equity Risk Premium", "Cost of Equity (CAPM)", "Kursziel Ø Konsens"],
+            "Wert": [f"{beta:.2f}", f"{rf:.2f}%", f"{erp:.2f}%", f"{rf + (beta * erp):.2f}%", f"{info.get('targetMeanPrice', 0):,.2f}"]
         }), use_container_width=True)
+
+with tabs[4]:
+    if not dividends.empty:
+        annual_div = dividends.resample('YE').sum()
+        d1, d2 = st.columns(2)
+        with d1:
+            div_yield = info.get("dividendYield")
+            st.dataframe(pd.DataFrame({
+                "Kennzahl": ["Dividend Yield", "Payout Ratio", "Dividend Rate"],
+                "Wert": [
+                    f"{div_yield * 100:.2f}%" if div_yield else "0.00%",
+                    f"{info.get('payoutRatio', 0) * 100:.2f}%" if info.get('payoutRatio') else "N/A",
+                    f"{info.get('dividendRate', 0):.2f} {info.get('currency', '')}" if info.get('dividendRate') else "0.00"
+                ]
+            }), use_container_width=True)
+        with d2:
+            st.write("**Dividenden je Aktie (letzte Jahre)**")
+            df_div_hist = pd.DataFrame(annual_div.tail(5)).rename(columns={"Dividends": "Ausschüttung"})
+            df_div_hist.index = [d.strftime("%Y") for d in df_div_hist.index]
+            st.dataframe(df_div_hist, use_container_width=True)
+    else:
+        st.info("Dieses Wertpapier zahlt keine Dividenden aus.")
