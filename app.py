@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Financial Analytics Terminal", layout="wide", initial_sidebar_state="collapsed")
 
-# 1. Custom CSS für Terminal-Layout und saubere Buttons in den Kacheln
+# 1. Custom CSS für Terminal-Layout und Modals
 st.markdown("""
 <style>
     .stApp {
@@ -102,10 +102,10 @@ st.markdown("""
         margin: 18px 0 8px 4px;
     }
 
-    /* Modal / Pop-up Breite */
+    /* Modal / Pop-up Breite vergrößern */
     div[data-testid="stDialog"] div[role="dialog"] {
-        width: 80vw !important;
-        max-width: 1100px !important;
+        width: 88vw !important;
+        max-width: 1250px !important;
     }
 
     div[data-testid="stTextInput"] input {
@@ -178,7 +178,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 symbol = resolve_ticker(search_input)
 ticker = yf.Ticker(symbol)
 
-with st.spinner(f"Lade Finanzdaten für {symbol}..."):
+with st.spinner(f"Lade Finanzdaten & 20-Jahres-Historie für {symbol}..."):
     try:
         info = ticker.info or {}
         is_quarterly = (period_type == "Quartal")
@@ -186,7 +186,9 @@ with st.spinner(f"Lade Finanzdaten für {symbol}..."):
         balance_sheet = ticker.quarterly_balance_sheet if is_quarterly else ticker.balance_sheet
         cashflow = ticker.quarterly_cashflow if is_quarterly else ticker.cashflow
         dividends = ticker.dividends
-        hist = ticker.history(period="1y")
+        # Vollständige 20-Jahres-Kurshistorie
+        hist_20y = ticker.history(period="20y")
+        hist_1y = ticker.history(period="1y")
     except Exception as e:
         st.error(f"Fehler beim Datenabruf: {e}")
         st.stop()
@@ -215,7 +217,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 4. Plotly Helper-Funktionen
+# Plotly Base Styling Funktion für Dash-Kacheln
 def clean_chart(fig, y_prefix="", y_suffix="", show_legend=False):
     fig.update_layout(
         template="plotly_white",
@@ -280,8 +282,8 @@ net_debt = total_debt - cash.fillna(0)
 equity = get_row("Stockholders Equity", balance_sheet)
 
 price_chg = 0.0
-if not hist.empty and len(hist) > 1:
-    price_chg = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
+if not hist_1y.empty and len(hist_1y) > 1:
+    price_chg = ((hist_1y['Close'].iloc[-1] - hist_1y['Close'].iloc[0]) / hist_1y['Close'].iloc[0]) * 100
 
 def calc_margin_series(numerator_series):
     vals = []
@@ -291,65 +293,109 @@ def calc_margin_series(numerator_series):
         vals.append((num / r * 100) if (pd.notnull(r) and r != 0) else 0)
     return vals
 
-# 5. VOLLBILD-MODAL (Pop-up mit Detailanalyse)
-@st.dialog("Detaillierte Metrik-Analyse")
-def open_detail_modal(metric_name, series_data, is_pct=False, unit_suffix="B", color="#3b82f6", chart_type="bar", description=""):
-    st.subheader(f"{metric_name} — Deep Dive")
-    st.caption(f"Historische Zeitreihe ({period_type}) für {company_name}")
-    
-    # Großes Plotly-Chart
-    fig = go.Figure()
-    if chart_type == "bar":
-        fig.add_trace(go.Bar(
-            x=date_labels, 
-            y=series_data, 
-            marker_color=color, 
-            text=[f"{v:.2f}{'%' if is_pct else unit_suffix}" for v in series_data],
-            textposition='auto'
-        ))
-    elif chart_type == "scatter":
-        fig.add_trace(go.Scatter(
-            x=date_labels, 
-            y=series_data, 
-            mode='lines+markers', 
-            line=dict(color=color, width=3), 
-            marker=dict(size=8)
-        ))
-    
-    fig.update_layout(
-        template="plotly_white",
-        height=380,
-        margin=dict(l=50, r=20, t=20, b=40),
-        xaxis=dict(showgrid=True, gridcolor="#f1f5f9"),
-        yaxis=dict(showgrid=True, gridcolor="#f1f5f9", ticksuffix="%" if is_pct else unit_suffix)
-    )
-    st.plotly_chart(fig, use_container_width=True)
+# 4. VOLLBILD-MODAL MIT 15–20 JAHREN HISTORIE & RANGE SLIDER
+@st.dialog("Detaillierte Langzeit-Analyse (15-20 Jahre)")
+def open_detail_modal(metric_name, series_data, is_pct=False, unit_suffix="B", color="#3b82f6", chart_type="bar", is_price_chart=False, description=""):
+    st.subheader(f"{metric_name} — Langzeit-Trend & Deep Dive")
+    st.caption(f"Historischer Verlauf der letzten bis zu 20 Jahre für {company_name}")
 
-    # Historische Datentabelle & Wachstumsraten
-    df_detail = pd.DataFrame({
-        "Periode": date_labels,
-        "Wert": [f"{v:.2f} %" if is_pct else f"{v:,.2f} {unit_suffix}" for v in series_data]
-    })
-    
-    # Wachstumsrate (YoY bzw. QoQ)
-    growth_rates = ["-"]
-    for i in range(1, len(series_data)):
-        prev = series_data[i-1]
-        curr = series_data[i]
-        if prev != 0 and pd.notnull(prev):
-            pct = ((curr - prev) / abs(prev)) * 100
-            growth_rates.append(f"{pct:+.2f}%")
-        else:
-            growth_rates.append("N/A")
-    df_detail["Wachstum"] = growth_rates
-    
-    col_d1, col_d2 = st.columns([1.5, 1])
-    with col_d1:
-        st.write("**Historische Zahlen & Wachstumsraten**")
-        st.dataframe(df_detail.T, use_container_width=True)
-    with col_d2:
-        st.write("**Börsen-Kontext & Analyse**")
-        st.info(description if description else f"Diese Kennzahl spiegelt die fundamentale Entwicklung im Bereich {metric_name} wider.")
+    if is_price_chart:
+        # Voller 20-Jahres-Kursverlauf
+        df_hist = hist_20y[['Close']].copy().dropna()
+        df_hist.index = pd.to_datetime(df_hist.index)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_hist.index,
+            y=df_hist['Close'],
+            mode='lines',
+            line=dict(color=color, width=2),
+            fill='tozeroy',
+            fillcolor='rgba(22, 163, 74, 0.08)',
+            name="Schlusskurs"
+        ))
+        fig.update_layout(
+            template="plotly_white",
+            height=430,
+            margin=dict(l=50, r=20, t=20, b=40),
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                        dict(count=5, label="5Y", step="year", stepmode="backward"),
+                        dict(count=10, label="10Y", step="year", stepmode="backward"),
+                        dict(count=15, label="15Y", step="year", stepmode="backward"),
+                        dict(count=20, label="20Y", step="year", stepmode="backward"),
+                        dict(step="all", label="Max")
+                    ])
+                ),
+                rangeslider=dict(visible=True),
+                type="date"
+            ),
+            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", tickprefix="$")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        c_p1, c_p2, c_p3 = st.columns(3)
+        c_p1.metric("20-Jahres-Tief", f"${df_hist['Close'].min():,.2f}")
+        c_p2.metric("20-Jahres-Hoch", f"${df_hist['Close'].max():,.2f}")
+        total_ret = ((df_hist['Close'].iloc[-1] - df_hist['Close'].iloc[0]) / df_hist['Close'].iloc[0]) * 100
+        c_p3.metric("Gesamtrendite (20 Jahre)", f"{total_ret:+,.1f}%")
+
+    else:
+        # Fundamentaldaten-Chart mit interaktivem Range Slider
+        fig = go.Figure()
+        if chart_type == "bar":
+            fig.add_trace(go.Bar(
+                x=date_labels, 
+                y=series_data, 
+                marker_color=color, 
+                text=[f"{v:.2f}{'%' if is_pct else unit_suffix}" for v in series_data],
+                textposition='auto'
+            ))
+        elif chart_type == "scatter":
+            fig.add_trace(go.Scatter(
+                x=date_labels, 
+                y=series_data, 
+                mode='lines+markers', 
+                line=dict(color=color, width=3), 
+                marker=dict(size=8)
+            ))
+        
+        fig.update_layout(
+            template="plotly_white",
+            height=420,
+            margin=dict(l=50, r=20, t=20, b=40),
+            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", rangeslider=dict(visible=True)),
+            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", ticksuffix="%" if is_pct else unit_suffix)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Historische Tabelle & Wachstumsraten
+        df_detail = pd.DataFrame({
+            "Periode": date_labels,
+            "Wert": [f"{v:.2f} %" if is_pct else f"{v:,.2f} {unit_suffix}" for v in series_data]
+        })
+        
+        growth_rates = ["-"]
+        for i in range(1, len(series_data)):
+            prev = series_data[i-1]
+            curr = series_data[i]
+            if prev != 0 and pd.notnull(prev):
+                pct = ((curr - prev) / abs(prev)) * 100
+                growth_rates.append(f"{pct:+.2f}%")
+            else:
+                growth_rates.append("N/A")
+        df_detail["Wachstum"] = growth_rates
+        
+        col_d1, col_d2 = st.columns([1.6, 1])
+        with col_d1:
+            st.write("**Historische Zahlen & Wachstumsraten**")
+            st.dataframe(df_detail.T, use_container_width=True)
+        with col_d2:
+            st.write("**Börsen-Kontext & Analyse**")
+            st.info(description if description else f"Fundamentale Entwicklung für {metric_name}.")
+            st.caption("💡 Hinweis: Yahoo Finance liefert strukturierte Bilanzen über die API für bis zu 5 Geschäftsjahre bzw. 5 Quartale. Für längere Kurs- und Dividendenhistorien reicht die Datenbasis bis zu 20 Jahre zurück.")
 
 # ==============================================================================
 # REIHE 1: Price, Revenue, Gross Profit, Operating Income
@@ -365,10 +411,10 @@ with r1_c1:
         arrow = "↑" if price_chg >= 0 else "↓"
         st.markdown(f'<span class="metric-card-title">Price <span class="{badge_cls}">{arrow} {price_chg:+.2f}%</span></span>', unsafe_allow_html=True)
     with h_col2:
-        if st.button("↗", key="btn_p", help="Vollbild / Details"):
-            open_detail_modal("Aktienkurs (1Y)", hist['Close'].tolist(), is_pct=False, unit_suffix="", color="#16a34a", chart_type="scatter", description="1-Jahres-Kursverlauf des Wertpapiers.")
-    if not hist.empty:
-        fig_p = go.Figure(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', line=dict(color="#16a34a", width=1.8), fill='tozeroy', fillcolor='rgba(22, 163, 74, 0.1)'))
+        if st.button("↗", key="btn_p", help="20-Jahre-Vollbild"):
+            open_detail_modal("Aktienkurs", [], is_price_chart=True, color="#16a34a", description="Vollständige 20-Jahres-Preisentwicklung mit Range Slider und Zoom.")
+    if not hist_1y.empty:
+        fig_p = go.Figure(go.Scatter(x=hist_1y.index, y=hist_1y['Close'], mode='lines', line=dict(color="#16a34a", width=1.8), fill='tozeroy', fillcolor='rgba(22, 163, 74, 0.1)'))
         st.plotly_chart(clean_chart(fig_p, y_prefix="$"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -380,7 +426,7 @@ with r1_c2:
         st.markdown('<span class="metric-card-title">Revenue</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_r", help="Vollbild / Details"):
-            open_detail_modal("Revenue (Umsatz)", rev_vals, is_pct=False, unit_suffix="B", color="#ea580c", chart_type="bar", description="Gesamtumsatz über die gewählten Berichtszeiträume in Milliarden USD.")
+            open_detail_modal("Revenue (Umsatz)", rev_vals, is_pct=False, unit_suffix="B", color="#ea580c", chart_type="bar", description="Gesamtumsatz in Milliarden USD über die Berichtszeiträume.")
     fig_r = go.Figure(go.Bar(x=date_labels, y=rev_vals, marker_color="#ea580c", width=0.45))
     st.plotly_chart(clean_chart(fig_r, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -393,7 +439,7 @@ with r1_c3:
         st.markdown('<span class="metric-card-title"><span class="kpi-badge">KPI</span> Gross Profit</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_gp", help="Vollbild / Details"):
-            open_detail_modal("Gross Profit (Bruttogewinn)", gp_vals, is_pct=False, unit_suffix="B", color="#d97706", chart_type="bar", description="Bruttogewinn nach Abzug der direkten Herstellungskosten (COGS).")
+            open_detail_modal("Gross Profit (Bruttogewinn)", gp_vals, is_pct=False, unit_suffix="B", color="#d97706", chart_type="bar", description="Bruttogewinn nach Abzug direkter Herstellungskosten (COGS).")
     fig_g = go.Figure(go.Bar(x=date_labels, y=gp_vals, marker_color="#d97706", width=0.45))
     st.plotly_chart(clean_chart(fig_g, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -406,7 +452,7 @@ with r1_c4:
         st.markdown('<span class="metric-card-title"><span class="kpi-badge">KPI</span> Operating Income</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_ebit", help="Vollbild / Details"):
-            open_detail_modal("Operating Income (EBIT)", ebit_vals, is_pct=False, unit_suffix="B", color="#64748b", chart_type="bar", description="Operativer Gewinn vor Zinsen und Steuern.")
+            open_detail_modal("Operating Income (EBIT)", ebit_vals, is_pct=False, unit_suffix="B", color="#64748b", chart_type="bar", description="Operativer Gewinn vor Steuern und Zinsaufwendungen.")
     fig_eb = go.Figure(go.Bar(x=date_labels, y=ebit_vals, marker_color="#64748b", width=0.45))
     st.plotly_chart(clean_chart(fig_eb, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -424,7 +470,7 @@ with r2_c1:
         st.markdown('<span class="metric-card-title">EBITDA</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_ebitda", help="Vollbild / Details"):
-            open_detail_modal("EBITDA", ebitda_vals, is_pct=False, unit_suffix="B", color="#93c5fd", chart_type="bar", description="Gewinn vor Zinsen, Steuern, Abschreibungen auf Sachanlagen und immaterielle Vermögensgegenstände.")
+            open_detail_modal("EBITDA", ebitda_vals, is_pct=False, unit_suffix="B", color="#93c5fd", chart_type="bar", description="Gewinn vor Zinsen, Steuern und Abschreibungen.")
     fig_ebitda = go.Figure(go.Bar(x=date_labels, y=ebitda_vals, marker_color="#93c5fd", width=0.45))
     st.plotly_chart(clean_chart(fig_ebitda, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -437,7 +483,7 @@ with r2_c2:
         st.markdown('<span class="metric-card-title">Net Income</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_ni", help="Vollbild / Details"):
-            open_detail_modal("Net Income (Nettogewinn)", ni_vals, is_pct=False, unit_suffix="B", color="#fca5a5", chart_type="bar", description="Reingewinn nach Steuern und Zinsaufwendungen.")
+            open_detail_modal("Net Income (Nettogewinn)", ni_vals, is_pct=False, unit_suffix="B", color="#fca5a5", chart_type="bar", description="Reingewinn nach Steuern und Zinskosten.")
     fig_ni = go.Figure(go.Bar(x=date_labels, y=ni_vals, marker_color="#fca5a5", width=0.45))
     st.plotly_chart(clean_chart(fig_ni, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -450,7 +496,7 @@ with r2_c3:
         st.markdown('<span class="metric-card-title">Free Cash Flow</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_fcf", help="Vollbild / Details"):
-            open_detail_modal("Free Cash Flow (FCF)", fcf_vals, is_pct=False, unit_suffix="B", color="#b45309", chart_type="bar", description="Operativer Cashflow minus Sachinvestitionen (CapEx) – der tatsächlich frei verfügbare Cashflow.")
+            open_detail_modal("Free Cash Flow (FCF)", fcf_vals, is_pct=False, unit_suffix="B", color="#b45309", chart_type="bar", description="Operativer Cashflow minus CapEx – die frei verfügbare Liquidität.")
     fig_f = go.Figure(go.Bar(x=date_labels, y=fcf_vals, marker_color="#b45309", width=0.45))
     st.plotly_chart(clean_chart(fig_f, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -495,7 +541,7 @@ with r3_c2:
         st.markdown('<span class="metric-card-title">Operating Margin</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_om", help="Vollbild / Details"):
-            open_detail_modal("Operating Margin (%)", om_vals, is_pct=True, color="#64748b", chart_type="scatter", description="Operative Marge (EBIT-Marge): Misst die Effizienz des Kerngeschäfts.")
+            open_detail_modal("Operating Margin (%)", om_vals, is_pct=True, color="#64748b", chart_type="scatter", description="Operative Marge (EBIT-Marge): Effizienz des Kerngeschäfts.")
     fig_om = go.Figure(go.Scatter(x=date_labels, y=om_vals, mode='lines+markers', line=dict(color="#64748b", width=2.2), marker=dict(size=5)))
     st.plotly_chart(clean_chart(fig_om, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -521,7 +567,7 @@ with r3_c4:
         st.markdown('<span class="metric-card-title">Net Profit Margin</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_npm", help="Vollbild / Details"):
-            open_detail_modal("Net Profit Margin (%)", npm_vals, is_pct=True, color="#ef4444", chart_type="scatter", description="Nettogewinnmarge: Wie viel Cent je Dollar/Euro Umsatz als Reingewinn verbleiben.")
+            open_detail_modal("Net Profit Margin (%)", npm_vals, is_pct=True, color="#ef4444", chart_type="scatter", description="Nettogewinnmarge: Reingewinn-Anteil am Gesamtumsatz.")
     fig_npm = go.Figure(go.Scatter(x=date_labels, y=npm_vals, mode='lines+markers', line=dict(color="#ef4444", width=2.2), marker=dict(size=5)))
     st.plotly_chart(clean_chart(fig_npm, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -557,7 +603,7 @@ with r4_c2:
         st.markdown('<span class="metric-card-title">Net Debt</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_nd", help="Vollbild / Details"):
-            open_detail_modal("Net Debt (Nettoschulden)", nd_vals, is_pct=False, unit_suffix="B", color="#0f172a", chart_type="bar", description="Nettoschulden (Gesamtverschuldung abzüglich liquider Mittel). Negative Werte bedeuten eine Netto-Cash-Position.")
+            open_detail_modal("Net Debt (Nettoschulden)", nd_vals, is_pct=False, unit_suffix="B", color="#0f172a", chart_type="bar", description="Nettoschulden (Gesamtverschuldung minus liquide Mittel).")
     fig_nd = go.Figure(go.Bar(x=date_labels, y=nd_vals, marker_color="#0f172a", width=0.45))
     st.plotly_chart(clean_chart(fig_nd, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -591,7 +637,7 @@ with r4_c4:
         st.markdown('<span class="metric-card-title">Net Debt / EBITDA</span>', unsafe_allow_html=True)
     with h_col2:
         if st.button("↗", key="btn_nd_eb", help="Vollbild / Details"):
-            open_detail_modal("Net Debt / EBITDA", nd_ebitda_vals, is_pct=False, unit_suffix="x", color="#0284c7", chart_type="scatter", description="Schuldendeckungsgrad: Zeigt, wie viele Jahre an operativem EBITDA nötig wären, um die Nettoschulden vollständig zu tilgen.")
+            open_detail_modal("Net Debt / EBITDA", nd_ebitda_vals, is_pct=False, unit_suffix="x", color="#0284c7", chart_type="scatter", description="Schuldendeckungsgrad: Zeigt, wie viele Jahre an operativem EBITDA nötig wären, um die Nettoschulden zu decken.")
     fig_nd_eb = go.Figure(go.Scatter(x=date_labels, y=nd_ebitda_vals, mode='lines+markers', line=dict(color="#0284c7", width=2.2), marker=dict(size=5)))
     st.plotly_chart(clean_chart(fig_nd_eb, y_suffix="x"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
@@ -729,10 +775,10 @@ with tabs[4]:
         d_c1, d_c2 = st.columns(2)
         annual_div = dividends.resample('YE').sum()
         with d_c1:
-            st.write("**Dividenden-Historie (letzte 8 Jahre)**")
+            st.write("**Dividenden-Historie (letzte Jahre)**")
             fig_div = go.Figure(go.Bar(
-                x=[d.strftime("%Y") for d in annual_div.index[-8:]],
-                y=annual_div.values[-8:],
+                x=[d.strftime("%Y") for d in annual_div.index[-15:]],
+                y=annual_div.values[-15:],
                 marker_color="#8b5cf6",
                 width=0.45
             ))
