@@ -147,16 +147,4 @@ fcf = ocf.fillna(0) + capex.fillna(0)
 # Kursveränderung (1Y)
 curr_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
 price_change_pct = 0.0
-if not hist.empty and len(hist) > 1:
-    first_price = hist['Close'].iloc[0]
-    last_price = hist['Close'].iloc[-1]
-    price_change_pct = ((last_price - first_price) / first_price) * 100
-
-st.markdown(f"## {info.get('longName', ticker_symbol)} ({ticker_symbol})")
-
-# REIHE 1: VISUELLES KARTEN-RASTER
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    st.markdown(f"""
-    <div
+if
