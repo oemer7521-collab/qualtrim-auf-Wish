@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Financial Analytics Terminal", layout="wide", initial_sidebar_state="collapsed")
 
-# 1. Custom CSS für ein modernes Terminal-Layout
+# 1. Custom CSS für ein durchgehendes Kasten-/Card-Layout
 st.markdown("""
 <style>
     .stApp {
@@ -102,7 +102,17 @@ st.markdown("""
         border-radius: 4px;
     }
 
-    /* Bereinigung der Streamlit-Eingaben */
+    /* Section Subheadings */
+    .section-label {
+        font-size: 14px;
+        font-weight: 700;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        margin: 18px 0 8px 4px;
+    }
+
+    /* Input-Styling */
     div[data-testid="stTextInput"] input {
         border-radius: 8px !important;
         border: 1px solid #cbd5e1 !important;
@@ -125,14 +135,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. State-Management für Schnellwahl-Tags
+# 2. State-Management & Ticker-Auflösung
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = "ServiceNow"
 
 def set_ticker(ticker_name):
     st.session_state.selected_ticker = ticker_name
 
-# 3. Ticker-Auflösung via Yahoo Search API
 def resolve_ticker(query: str) -> str:
     query = query.strip()
     if not query:
@@ -148,7 +157,7 @@ def resolve_ticker(query: str) -> str:
         pass
     return query.upper()
 
-# 4. Interaktive Steuerungsleiste (Search & Filter Bar)
+# 3. Interaktive Such- und Navigationsleiste
 st.markdown('<div class="search-nav-container">', unsafe_allow_html=True)
 col_nav1, col_nav2, col_nav3 = st.columns([3.5, 1.3, 0.8])
 
@@ -166,7 +175,6 @@ with col_nav2:
 with col_nav3:
     st.button("Laden", use_container_width=True)
 
-# Schnellwahl-Chips
 st.caption("Schnellauswahl:")
 chip_cols = st.columns(8)
 quick_picks = [("ServiceNow", "NOW"), ("Apple", "AAPL"), ("Microsoft", "MSFT"), ("Nvidia", "NVDA"), ("Amazon", "AMZN"), ("Alphabet", "GOOGL"), ("Tesla", "TSLA"), ("SAP", "SAP")]
@@ -198,7 +206,6 @@ if not info or financials.empty:
     st.warning(f"Keine Kennzahlen für '{search_input}' ({symbol}) gefunden.")
     st.stop()
 
-# 5. Elegantes Company Info Banner
 company_name = info.get("longName", symbol)
 sector = info.get("sector", "N/A")
 industry = info.get("industry", "N/A")
@@ -263,6 +270,7 @@ def get_row(key, df):
             return df.loc[idx]
     return pd.Series(0, index=df.columns)
 
+# Finanz-Metriken abrufen
 rev = get_row("Total Revenue", financials)
 gp = get_row("Gross Profit", financials)
 ebit = get_row("Operating Income", financials)
@@ -273,7 +281,16 @@ capex = get_row("Capital Expenditure", cashflow)
 fcf = ocf.fillna(0) + capex.fillna(0)
 shares = info.get("sharesOutstanding", 1) or 1
 
-# Kursveränderung (1Y)
+# Bilanz-Metriken
+total_assets = get_row("Total Assets", balance_sheet)
+total_liab = get_row("Total Liabilities Net Minority Interest", balance_sheet)
+cash = get_row("Cash And Cash Equivalents", balance_sheet)
+st_debt = get_row("Current Debt", balance_sheet)
+lt_debt = get_row("Long Term Debt", balance_sheet)
+total_debt = st_debt.fillna(0) + lt_debt.fillna(0)
+net_debt = total_debt - cash.fillna(0)
+equity = get_row("Stockholders Equity", balance_sheet)
+
 price_chg = 0.0
 if not hist.empty and len(hist) > 1:
     price_chg = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
@@ -281,6 +298,7 @@ if not hist.empty and len(hist) > 1:
 # ==============================================================================
 # REIHE 1: Price, Revenue, Gross Profit, Operating Income
 # ==============================================================================
+st.markdown('<div class="section-label">Ertrag & Performance</div>', unsafe_allow_html=True)
 r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
 
 with r1_c1:
@@ -349,7 +367,88 @@ with r2_c4:
     st.plotly_chart(clean_chart(fig_e, y_prefix="$"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+# ==============================================================================
+# REIHE 3: MARGENPROFIL (Gross, Operating, EBITDA, Net Margin)
+# ==============================================================================
+st.markdown('<div class="section-label">Margenprofil & Profitabilität (%)</div>', unsafe_allow_html=True)
+r3_c1, r3_c2, r3_c3, r3_c4 = st.columns(4)
+
+def calc_margin_series(numerator_series):
+    vals = []
+    for y in cols_chrono:
+        r = rev.get(y, 0)
+        num = numerator_series.get(y, 0)
+        vals.append((num / r * 100) if (pd.notnull(r) and r != 0) else 0)
+    return vals
+
+with r3_c1:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Gross Margin</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_gm = go.Figure(go.Scatter(x=date_labels, y=calc_margin_series(gp), mode='lines+markers', line=dict(color="#d97706", width=2.2), marker=dict(size=5)))
+    st.plotly_chart(clean_chart(fig_gm, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r3_c2:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Operating Margin</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_om = go.Figure(go.Scatter(x=date_labels, y=calc_margin_series(ebit), mode='lines+markers', line=dict(color="#64748b", width=2.2), marker=dict(size=5)))
+    st.plotly_chart(clean_chart(fig_om, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r3_c3:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">EBITDA Margin</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_em = go.Figure(go.Scatter(x=date_labels, y=calc_margin_series(ebitda), mode='lines+markers', line=dict(color="#3b82f6", width=2.2), marker=dict(size=5)))
+    st.plotly_chart(clean_chart(fig_em, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r3_c4:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Net Profit Margin</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_npm = go.Figure(go.Scatter(x=date_labels, y=calc_margin_series(net_inc), mode='lines+markers', line=dict(color="#ef4444", width=2.2), marker=dict(size=5)))
+    st.plotly_chart(clean_chart(fig_npm, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ==============================================================================
+# REIHE 4: BILANZ & VERSCHULDUNG (Debt, Cash, Net Debt, Ratios)
+# ==============================================================================
+st.markdown('<div class="section-label">Bilanz, Liquidität & Verschuldung</div>', unsafe_allow_html=True)
+r4_c1, r4_c2, r4_c3, r4_c4 = st.columns(4)
+
+with r4_c1:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Total Debt</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_td = go.Figure(go.Bar(x=date_labels, y=[total_debt.get(y, 0)/1e9 for y in cols_chrono], marker_color="#ef4444", width=0.45))
+    st.plotly_chart(clean_chart(fig_td, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r4_c2:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Cash & Equivalents</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_cash = go.Figure(go.Bar(x=date_labels, y=[cash.get(y, 0)/1e9 for y in cols_chrono], marker_color="#22c55e", width=0.45))
+    st.plotly_chart(clean_chart(fig_cash, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r4_c3:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Net Debt</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_nd = go.Figure(go.Bar(x=date_labels, y=[net_debt.get(y, 0)/1e9 for y in cols_chrono], marker_color="#0f172a", width=0.45))
+    st.plotly_chart(clean_chart(fig_nd, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with r4_c4:
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Debt-to-Equity Ratio</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    de_vals = []
+    for y in cols_chrono:
+        eq = equity.get(y, np.nan)
+        td = total_debt.get(y, np.nan)
+        de_vals.append((td / eq) if pd.notnull(eq) and eq != 0 else 0)
+    fig_de = go.Figure(go.Scatter(x=date_labels, y=de_vals, mode='lines+markers', line=dict(color="#8b5cf6", width=2.2), marker=dict(size=5)))
+    st.plotly_chart(clean_chart(fig_de, y_suffix="x"), use_container_width=True, config={'displayModeBar': False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
 
 # ==============================================================================
 # TAB-ÜBERSICHT: ALLE DETAILTABELLEN
@@ -400,26 +499,8 @@ with tabs[0]:
         st.dataframe(format_df(df_inc), use_container_width=True)
 
 with tabs[1]:
-    total_assets = get_row("Total Assets", balance_sheet)
-    total_liab = get_row("Total Liabilities Net Minority Interest", balance_sheet)
-    cash = get_row("Cash And Cash Equivalents", balance_sheet)
-    st_debt = get_row("Current Debt", balance_sheet)
-    lt_debt = get_row("Long Term Debt", balance_sheet)
-    total_debt = st_debt.fillna(0) + lt_debt.fillna(0)
-    net_debt = total_debt - cash.fillna(0)
-    equity = get_row("Stockholders Equity", balance_sheet)
-
     b_c1, b_c2 = st.columns([1, 1])
     with b_c1:
-        st.write("**Verschuldungsstruktur (Mrd.)**")
-        fig_debt = go.Figure()
-        fig_debt.add_trace(go.Bar(x=date_labels, y=[total_debt.get(y, 0)/1e9 for y in cols_chrono], name="Total Debt", marker_color="#ef4444"))
-        fig_debt.add_trace(go.Bar(x=date_labels, y=[cash.get(y, 0)/1e9 for y in cols_chrono], name="Cash", marker_color="#22c55e"))
-        fig_debt.add_trace(go.Scatter(x=date_labels, y=[net_debt.get(y, 0)/1e9 for y in cols_chrono], mode='lines+markers', name="Net Debt", line=dict(color="#0f172a", width=2)))
-        fig_debt.update_layout(height=280, margin=dict(l=40, r=10, t=10, b=30), template="plotly_white", barmode="group")
-        st.plotly_chart(fig_debt, use_container_width=True, config={'displayModeBar': False})
-
-    with b_c2:
         st.write("**Bilanz- & Verschuldungskennzahlen**")
         df_bs = pd.DataFrame({
             "Total Assets": total_assets,
@@ -431,6 +512,22 @@ with tabs[1]:
             "Net Debt": net_debt
         }).T
         st.dataframe(format_df(df_bs), use_container_width=True)
+
+    with b_c2:
+        st.write("**Verschuldungsgrade & Deckung**")
+        ratios_bs = pd.DataFrame(index=["Debt-to-Equity", "Net Debt / EBITDA"], columns=cols_chrono)
+        for y in cols_chrono:
+            eq = equity.get(y, np.nan)
+            eb = ebitda.get(y, np.nan)
+            td = total_debt.get(y, np.nan)
+            nd = net_debt.get(y, np.nan)
+            ratios_bs.loc["Debt-to-Equity", y] = f"{(td/eq):.2f}x" if pd.notnull(eq) and eq != 0 else "N/A"
+            ratios_bs.loc["Net Debt / EBITDA", y] = f"{(nd/eb):.2f}x" if pd.notnull(eb) and eb != 0 else "N/A"
+        ratios_bs.columns = [
+            pd.to_datetime(c).strftime("Q%q '%y") if is_quarterly else pd.to_datetime(c).strftime("%Y-%m-%d")
+            for c in ratios_bs.columns
+        ]
+        st.dataframe(ratios_bs, use_container_width=True)
 
 with tabs[2]:
     cf_c1, cf_c2 = st.columns([1, 1])
