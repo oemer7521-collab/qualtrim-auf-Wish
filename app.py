@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Financial Analytics Terminal", layout="wide", initial_sidebar_state="collapsed")
 
-# 1. Custom CSS für ein aufgeräumtes Terminal-Design
+# 1. Custom CSS für ein modernes Terminal-Layout
 st.markdown("""
 <style>
     .stApp {
@@ -15,41 +15,51 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1.2rem !important;
         padding-bottom: 3rem !important;
         max-width: 96% !important;
     }
     
-    /* Top Bar Header */
-    .top-header-box {
+    /* Top Search & Nav Bar Box */
+    .search-nav-container {
+        background: #ffffff;
+        border-radius: 14px;
+        border: 1px solid #e2e8f0;
+        padding: 14px 20px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+        margin-bottom: 16px;
+    }
+    
+    /* Company Info Banner */
+    .company-banner {
+        background: #ffffff;
+        border-radius: 14px;
+        border: 1px solid #e2e8f0;
+        padding: 18px 24px;
+        margin-bottom: 16px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        background: #ffffff;
-        padding: 16px 24px;
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
     }
-    .company-title {
+    .company-name-text {
         font-size: 24px;
         font-weight: 700;
         color: #0f172a;
-        margin: 0;
+        letter-spacing: -0.5px;
     }
-    .company-meta {
+    .company-sub-text {
         font-size: 13px;
         color: #64748b;
-        margin-top: 4px;
+        margin-top: 2px;
     }
 
-    /* KPI Card Container */
-    .metric-card {
+    /* KPI Card Box */
+    .metric-card-box {
         background: #ffffff;
         border-radius: 12px;
         border: 1px solid #e2e8f0;
-        padding: 12px 14px 6px 14px;
+        padding: 12px 14px 4px 14px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.02);
         margin-bottom: 12px;
     }
@@ -57,7 +67,7 @@ st.markdown("""
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
     }
     .metric-card-title {
         font-size: 13px;
@@ -72,7 +82,7 @@ st.markdown("""
         color: #b91c1c;
         font-size: 9.5px;
         font-weight: 700;
-        padding: 1.5px 5px;
+        padding: 1px 5px;
         border-radius: 4px;
     }
     .price-badge-up {
@@ -80,7 +90,7 @@ st.markdown("""
         color: #15803d;
         font-size: 11px;
         font-weight: 600;
-        padding: 2px 6px;
+        padding: 1px 6px;
         border-radius: 4px;
     }
     .price-badge-down {
@@ -88,11 +98,24 @@ st.markdown("""
         color: #b91c1c;
         font-size: 11px;
         font-weight: 600;
-        padding: 2px 6px;
+        padding: 1px 6px;
         border-radius: 4px;
     }
 
-    /* Tabellen */
+    /* Bereinigung der Streamlit-Eingaben */
+    div[data-testid="stTextInput"] input {
+        border-radius: 8px !important;
+        border: 1px solid #cbd5e1 !important;
+        background-color: #f8fafc !important;
+        font-size: 14px !important;
+        color: #0f172a !important;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color: #3b82f6 !important;
+        background-color: #ffffff !important;
+    }
+
+    /* Dataframe-Styling */
     div[data-testid="stDataFrame"] {
         background-color: #ffffff;
         border-radius: 10px;
@@ -102,11 +125,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Ticker-Suche
+# 2. State-Management für Schnellwahl-Tags
+if "selected_ticker" not in st.session_state:
+    st.session_state.selected_ticker = "ServiceNow"
+
+def set_ticker(ticker_name):
+    st.session_state.selected_ticker = ticker_name
+
+# 3. Ticker-Auflösung via Yahoo Search API
 def resolve_ticker(query: str) -> str:
     query = query.strip()
     if not query:
-        return "AAPL"
+        return "NOW"
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -118,14 +148,35 @@ def resolve_ticker(query: str) -> str:
         pass
     return query.upper()
 
-# 3. Header-Bereich mit sauberer Suchleiste
-top_c1, top_c2, top_c3 = st.columns([3, 1.2, 0.8])
-with top_c1:
-    search_input = st.text_input("Ticker oder Firmenname", value="Apple", label_visibility="collapsed", placeholder="Suche (z.B. Microsoft, NVDA, Tesla)...")
-with top_c2:
-    period_type = st.radio("Zeitraum", ["Jährlich", "Quartal"], horizontal=True, label_visibility="collapsed")
-with top_c3:
-    refresh_btn = st.button("Aktualisieren", use_container_width=True)
+# 4. Interaktive Steuerungsleiste (Search & Filter Bar)
+st.markdown('<div class="search-nav-container">', unsafe_allow_html=True)
+col_nav1, col_nav2, col_nav3 = st.columns([3.5, 1.3, 0.8])
+
+with col_nav1:
+    search_input = st.text_input(
+        "Suche",
+        value=st.session_state.selected_ticker,
+        placeholder="🔍 Suche nach Unternehmen oder Symbol (z.B. Microsoft, NOW, NVDA, SAP, Apple)...",
+        label_visibility="collapsed"
+    )
+
+with col_nav2:
+    period_type = st.radio("Intervall", ["Jährlich", "Quartal"], horizontal=True, label_visibility="collapsed")
+
+with col_nav3:
+    st.button("Laden", use_container_width=True)
+
+# Schnellwahl-Chips
+st.caption("Schnellauswahl:")
+chip_cols = st.columns(8)
+quick_picks = [("ServiceNow", "NOW"), ("Apple", "AAPL"), ("Microsoft", "MSFT"), ("Nvidia", "NVDA"), ("Amazon", "AMZN"), ("Alphabet", "GOOGL"), ("Tesla", "TSLA"), ("SAP", "SAP")]
+for i, (name, sym) in enumerate(quick_picks):
+    with chip_cols[i]:
+        if st.button(f"{sym}", key=f"chip_{sym}", use_container_width=True):
+            set_ticker(sym)
+            st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 symbol = resolve_ticker(search_input)
 ticker = yf.Ticker(symbol)
@@ -147,27 +198,28 @@ if not info or financials.empty:
     st.warning(f"Keine Kennzahlen für '{search_input}' ({symbol}) gefunden.")
     st.stop()
 
-# Info Header Banner
+# 5. Elegantes Company Info Banner
 company_name = info.get("longName", symbol)
 sector = info.get("sector", "N/A")
 industry = info.get("industry", "N/A")
 currency = info.get("currency", "USD")
 curr_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+m_cap = info.get("marketCap", 0)
 
 st.markdown(f"""
-<div class="top-header-box">
+<div class="company-banner">
     <div>
-        <div class="company-title">{company_name} ({symbol})</div>
-        <div class="company-meta">{sector} • {industry} • Währung in {currency}</div>
+        <div class="company-name-text">{company_name} ({symbol})</div>
+        <div class="company-sub-text">{sector} • {industry} • Währung in {currency}</div>
     </div>
     <div style="text-align: right;">
-        <div style="font-size: 22px; font-weight: 700; color: #0f172a;">{curr_price:,.2f} {currency}</div>
-        <div style="font-size: 12px; color: #64748b;">Market Cap: {info.get('marketCap', 0)/1e9:,.1f}B</div>
+        <div style="font-size: 24px; font-weight: 700; color: #0f172a;">{curr_price:,.2f} {currency}</div>
+        <div style="font-size: 13px; color: #64748b; font-weight: 500;">Market Cap: {m_cap/1e9:,.1f}B {currency}</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# 4. Plotly Helper-Funktion (ohne störende Menüleiste)
+# Plotly Base Styling Funktion
 def clean_chart(fig, y_prefix="", y_suffix=""):
     fig.update_layout(
         template="plotly_white",
@@ -206,7 +258,6 @@ date_labels = [
 def get_row(key, df):
     if key in df.index:
         return df.loc[key]
-    # Fallback-Suche
     for idx in df.index:
         if key.lower() in str(idx).lower():
             return df.loc[idx]
@@ -222,7 +273,7 @@ capex = get_row("Capital Expenditure", cashflow)
 fcf = ocf.fillna(0) + capex.fillna(0)
 shares = info.get("sharesOutstanding", 1) or 1
 
-# Kursentwicklung 1Y
+# Kursveränderung (1Y)
 price_chg = 0.0
 if not hist.empty and len(hist) > 1:
     price_chg = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
@@ -233,7 +284,7 @@ if not hist.empty and len(hist) > 1:
 r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
 
 with r1_c1:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     badge_cls = "price-badge-up" if price_chg >= 0 else "price-badge-down"
     arrow = "↑" if price_chg >= 0 else "↓"
     st.markdown(f'<div class="metric-card-header"><span class="metric-card-title">Price <span class="{badge_cls}">{arrow} {price_chg:+.2f}%</span></span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
@@ -244,21 +295,21 @@ with r1_c1:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r1_c2:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title">Revenue</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_r = go.Figure(go.Bar(x=date_labels, y=[rev.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#ea580c", width=0.45))
     st.plotly_chart(clean_chart(fig_r, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r1_c3:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title"><span class="kpi-badge">KPI</span> Gross Profit</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_g = go.Figure(go.Bar(x=date_labels, y=[gp.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#d97706", width=0.45))
     st.plotly_chart(clean_chart(fig_g, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r1_c4:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title"><span class="kpi-badge">KPI</span> Operating Income</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_eb = go.Figure(go.Bar(x=date_labels, y=[ebit.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#64748b", width=0.45))
     st.plotly_chart(clean_chart(fig_eb, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
@@ -270,38 +321,38 @@ with r1_c4:
 r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
 
 with r2_c1:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title">EBITDA</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_ebitda = go.Figure(go.Bar(x=date_labels, y=[ebitda.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#93c5fd", width=0.45))
     st.plotly_chart(clean_chart(fig_ebitda, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r2_c2:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title">Net Income</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_ni = go.Figure(go.Bar(x=date_labels, y=[net_inc.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#fca5a5", width=0.45))
     st.plotly_chart(clean_chart(fig_ni, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r2_c3:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title">Free Cash Flow</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     fig_f = go.Figure(go.Bar(x=date_labels, y=[fcf.get(y, 0) / 1e9 for y in cols_chrono], marker_color="#b45309", width=0.45))
     st.plotly_chart(clean_chart(fig_f, y_prefix="$", y_suffix="B"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 with r2_c4:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card-box">', unsafe_allow_html=True)
     st.markdown('<div class="metric-card-header"><span class="metric-card-title">EPS</span><span style="color:#94a3b8; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
     eps_vals = [net_inc.get(y, 0) / shares for y in cols_chrono]
     fig_e = go.Figure(go.Bar(x=date_labels, y=eps_vals, marker_color="#facc15", width=0.45))
     st.plotly_chart(clean_chart(fig_e, y_prefix="$"), use_container_width=True, config={'displayModeBar': False})
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# TAB-ÜBERSICHT: DETAILS, MARGEN, BILANZ, BEWERTUNG & DCF
+# TAB-ÜBERSICHT: ALLE DETAILTABELLEN
 # ==============================================================================
 tabs = st.tabs([
     "📈 Margenprofil & GuV",
@@ -385,7 +436,6 @@ with tabs[2]:
     cf_c1, cf_c2 = st.columns([1, 1])
     with cf_c1:
         st.write("**Free Cash Flow Rendite (FCF Yield)**")
-        m_cap = info.get("marketCap", np.nan)
         fcf_yield_vals = [((fcf.get(y, 0) / m_cap) * 100) if pd.notnull(m_cap) and m_cap > 0 else 0 for y in cols_chrono]
         fig_fy = go.Figure(go.Bar(x=date_labels, y=fcf_yield_vals, marker_color="#0d9488", width=0.45))
         st.plotly_chart(clean_chart(fig_fy, y_suffix="%"), use_container_width=True, config={'displayModeBar': False})
@@ -403,7 +453,6 @@ with tabs[3]:
     v_c1, v_c2 = st.columns(2)
     with v_c1:
         st.write("**Multiples & Bewertungsmetriken**")
-        m_cap = info.get("marketCap", np.nan)
         latest_fcf = fcf.iloc[-1] if not fcf.empty else np.nan
         p_fcf = (m_cap / latest_fcf) if pd.notnull(m_cap) and pd.notnull(latest_fcf) and latest_fcf > 0 else "N/A"
 
