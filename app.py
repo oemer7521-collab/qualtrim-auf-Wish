@@ -60,7 +60,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Ticker Auflösung
+# 2. Ticker-Auflösung
 def resolve_ticker(query: str) -> str:
     query = query.strip()
     if not query:
@@ -102,7 +102,7 @@ if not info or financials.empty:
     st.warning(f"Keine ausreichenden Daten für '{user_query}' ({ticker_symbol}) gefunden.")
     st.stop()
 
-# Plotly Base Styling Funktion
+# 3. Plotly Base Styling Funktion
 def build_clean_chart(fig, y_prefix="", y_suffix=""):
     fig.update_layout(
         template="plotly_white",
@@ -144,7 +144,52 @@ ocf = get_row("Operating Cash Flow", cashflow)
 capex = get_row("Capital Expenditure", cashflow)
 fcf = ocf.fillna(0) + capex.fillna(0)
 
-# Kursveränderung (1Y)
+# Kursveränderung (1 Jahr)
 curr_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
 price_change_pct = 0.0
-if
+if not hist.empty and len(hist) > 1:
+    first_price = hist['Close'].iloc[0]
+    last_price = hist['Close'].iloc[-1]
+    price_change_pct = ((last_price - first_price) / first_price) * 100
+
+st.markdown(f"## {info.get('longName', ticker_symbol)} ({ticker_symbol})")
+
+# ==============================================================================
+# REIHE 1: VISUELLES KARTEN-RASTER
+# ==============================================================================
+c1, c2, c3, c4 = st.columns(4)
+
+with c1:
+    arrow = "↑" if price_change_pct >= 0 else "↓"
+    badge_html = f'<div class="metric-card-header"><span class="metric-card-title">Price <span class="price-change-badge">{arrow} {price_change_pct:+.2f}%</span></span><span style="color:#9ca3af; font-size:12px;">↗</span></div>'
+    st.markdown(badge_html, unsafe_allow_html=True)
+    if not hist.empty:
+        fig_price = go.Figure()
+        fig_price.add_trace(go.Scatter(
+            x=hist.index, y=hist['Close'],
+            mode='lines',
+            line=dict(color="#16a34a", width=1.8),
+            fill='tozeroy',
+            fillcolor='rgba(22, 163, 74, 0.12)'
+        ))
+        st.plotly_chart(build_clean_chart(fig_price, y_prefix="$"), use_container_width=True)
+
+with c2:
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title">Revenue</span><span style="color:#9ca3af; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    fig_rev = go.Figure()
+    fig_rev.add_trace(go.Bar(
+        x=date_labels, y=[rev.get(y, 0) / 1e9 for y in years],
+        marker_color="#e08a3c",
+        width=0.45
+    ))
+    st.plotly_chart(build_clean_chart(fig_rev, y_prefix="$", y_suffix="B"), use_container_width=True)
+
+with c3:
+    st.markdown('<div class="metric-card-header"><span class="metric-card-title"><span class="kpi-pill">KPI</span> Gross Profit</span><span style="color:#9ca3af; font-size:12px;">↗</span></div>', unsafe_allow_html=True)
+    gp = get_row("Gross Profit", financials)
+    fig_gp = go.Figure()
+    fig_gp.add_trace(go.Bar(
+        x=date_labels, y=[gp.get(y, 0) / 1e9 for y in years],
+        marker_color="#c27838",
+        width=0.45
+    ))
