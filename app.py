@@ -102,7 +102,7 @@ if not info or financials.empty:
     st.warning(f"Keine ausreichenden Daten für '{user_query}' ({ticker_symbol}) gefunden.")
     st.stop()
 
-# Plotly Base Styling Funktion (Sicher gegen Plotly-Validierungsfehler)
+# Plotly Base Styling Funktion
 def build_clean_chart(fig, y_prefix="", y_suffix=""):
     fig.update_layout(
         template="plotly_white",
@@ -131,4 +131,32 @@ def build_clean_chart(fig, y_prefix="", y_suffix=""):
     )
     return fig
 
-years = sorted(financials.
+years = sorted(financials.columns)
+date_labels = [pd.to_datetime(y).strftime("%Y") for y in years]
+
+def get_row(key, df):
+    return df.loc[key] if key in df.index else pd.Series(0, index=df.columns)
+
+rev = get_row("Total Revenue", financials)
+ebitda = get_row("EBITDA", financials)
+net_inc = get_row("Net Income", financials)
+ocf = get_row("Operating Cash Flow", cashflow)
+capex = get_row("Capital Expenditure", cashflow)
+fcf = ocf.fillna(0) + capex.fillna(0)
+
+# Kursveränderung (1Y)
+curr_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+price_change_pct = 0.0
+if not hist.empty and len(hist) > 1:
+    first_price = hist['Close'].iloc[0]
+    last_price = hist['Close'].iloc[-1]
+    price_change_pct = ((last_price - first_price) / first_price) * 100
+
+st.markdown(f"## {info.get('longName', ticker_symbol)} ({ticker_symbol})")
+
+# REIHE 1: VISUELLES KARTEN-RASTER
+c1, c2, c3, c4 = st.columns(4)
+
+with c1:
+    st.markdown(f"""
+    <div
